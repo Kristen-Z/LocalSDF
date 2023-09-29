@@ -12,28 +12,8 @@ import math
 import copy
 import json
 import time
-import wandb
 import tools
 import tools.workspace as ws
-
-
-# # start a new wandb run to track this script
-# wandb.init(
-#     # set the wandb project where this run will be logged
-#     project="Scene_SDF",
-#     resume = True,
-#     # track hyperparameters and run metadata
-#     config={
-#     "learning_rate1": 0.0005,
-#     "learning_rate2": 0.0005,
-#     "architecture": "MLP",
-#     "dataset": "ShapeNet",
-#     "epochs": 2001,
-#     "regularization": "false",
-#     "optimizer":"many Adams",
-#     "decoder_layers": 4
-#     }
-# )
 
 
 class LearningRateSchedule:
@@ -308,8 +288,6 @@ def main_function(experiment_directory, continue_from, batch_split):
             save_mlp_params(experiment_directory,scene,param)
         for scene,param in optimizer_dict.items():
             save_optimizer(experiment_directory,scene,param)
-        #save_optimizer(experiment_directory, "latest.pth", optimizer_all, epoch)
-     #   save_model(experiment_directory, "latest.pth", scene_mlp, ws.mlp_params_subdir, epoch)
 
     def save_checkpoints(epoch,weight_dict,optimizer_dict):
 
@@ -318,8 +296,6 @@ def main_function(experiment_directory, continue_from, batch_split):
             save_mlp_params(experiment_directory,scene,param)
         for scene,param in optimizer_dict.items():
             save_optimizer(experiment_directory,scene,param)
-        #save_optimizer(experiment_directory, str(epoch) + ".pth", optimizer_all, epoch)
-       # save_model(experiment_directory, str(epoch) + ".pth", scene_mlp, ws.mlp_params_subdir, epoch)
 
     def signal_handler(sig, frame):
         logging.info("Stopping early...")
@@ -396,7 +372,6 @@ def main_function(experiment_directory, continue_from, batch_split):
 
     loss_log = []
     lr_log = []
-    lat_mag_log = []
     timing_log = []
     param_mag_log = {}
     mlp_param_mag_log = {}
@@ -410,10 +385,6 @@ def main_function(experiment_directory, continue_from, batch_split):
         logging.info('continuing from "{}"'.format(continue_from))
 
         weight_dict, optimizer_dict = preload_params(experiment_directory,scene_names,device)
-
-#         mlp_epoch = ws.load_model_parameters(
-#             experiment_directory, ws.mlp_params_subdir,continue_from, scene_mlp
-#         )
 
         model_epoch = ws.load_model_parameters(
             experiment_directory, ws.decoder_params_subdir,continue_from, decoder
@@ -441,14 +412,8 @@ def main_function(experiment_directory, continue_from, batch_split):
     logging.info(
         "Number of scene mlp parameters: {}".format(mlp_param_num)
         )
-                              
-    #wandb.watch(scene_mlp)
-    #wandb.watch(decoder)
     
     for epoch in range(start_epoch, num_epochs + 1):
-#         if not weight_dict_exist and epoch!=1:
-#             weight_dict = preload_mlp_weights(experiment_directory,scene_names,device)
-#             weight_dict_exist = True
         start = time.time()
 
         logging.info("epoch {}...".format(epoch))
@@ -457,7 +422,6 @@ def main_function(experiment_directory, continue_from, batch_split):
         scene_mlp.train()
         
         adjust_learning_rate(lr_schedules, optimizer_decoder, epoch)
-        #adjust_learning_rate(lr_schedules, optimizer_mlp, epoch)
         epoch_loss = 0.0
         reg_loss_mlp = 0.0
         reg_loss_decoder = 0.0
@@ -485,18 +449,11 @@ def main_function(experiment_directory, continue_from, batch_split):
             # Load MLP parameters:
             if epoch != 1:
                 scene_mlp.load_state_dict(weight_dict[scene[0]])
-                #load_mlp_parameters(experiment_directory,scene[0],scene_mlp,device)
-                #scene_mlp = load_mlp(experiment_directory,scene[0]).to(device)
-                #load_optimizer(experiment_directory,scene[0],optimizer_all)
-                #optimizer_mlp = load_optimizer(experiment_directory,scene[0])
                 optimizer_mlp.load_state_dict(optimizer_dict[scene[0]])
                 adjust_learning_rate(lr_schedules, optimizer_mlp, epoch)
-                #optimizer_mlp = optimizer_dict[scene[0]]
             else:
                 scene_mlp.apply(weight_init)
-                #scene_mlp = arch.Scene_MLP(latent_size,mlp_dims).to(device)
                 optimizer_mlp = torch.optim.Adam(scene_mlp.parameters(),lr_schedules[1].get_learning_rate(epoch))
-                #optimizer_dict[scene[0]] = optimizer_mlp
 
 
             batch_loss = 0.0
@@ -507,9 +464,7 @@ def main_function(experiment_directory, continue_from, batch_split):
             
             for i in range(batch_split):
                 batch_vecs = scene_mlp(xyz[i])
-                #print(batch_vecs.shape,batch_vecs)  
-                #input = torch.cat([batch_vecs, xyz[i]], dim=1)
-                # NN optimization
+
                 pred_sdf = decoder(batch_vecs)
 
                 if enforce_minmax:
@@ -565,25 +520,17 @@ def main_function(experiment_directory, continue_from, batch_split):
             optimizer_decoder.step()
             optimizer_mlp.step()
 
-             # Store the weights of mlp
-            #save_mlp_params(experiment_directory,scene[0],scene_mlp)
-            #save_mlp(experiment_directory,scene[0],scene_mlp)
+             # Store the weights of mlp & optimizer parameters
             weight_dict[scene[0]] = copy.deepcopy(scene_mlp.state_dict())
             optimizer_dict[scene[0]] = copy.deepcopy(optimizer_mlp.state_dict())
-            #save_optimizer(experiment_directory,scene[0],optimizer_mlp)
             epoch_loss += batch_loss
         
-#         for k,v in weight_dict.items():
-#             print(k,v)
         end = time.time()
         seconds_elapsed = end - start
         timing_log.append(seconds_elapsed)
         logging.info("Loss:{}...reconstruction_loss:{}...".format(epoch_loss/ (num_scenes),gt_loss/(num_scenes)))
         logging.info("Latent loss:{}...".format(reg_loss_latent/ (num_scenes)))
-        #wandb.log({"total_loss": epoch_loss/ num_scenes, "reg_loss_mlp": reg_loss_mlp/ num_scenes,"reg_loss_decoder":reg_loss_decoder/ num_scenes,"gt_loss":gt_loss/ num_scenes,"reg_loss_latent":reg_loss_latent/num_scenes}, step=epoch)
         lr_log.append([schedule.get_learning_rate(epoch) for schedule in lr_schedules])
-
-        # lat_mag_log.append(get_mean_latent_vector_magnitude(lat_vecs))
 
         append_parameter_magnitudes(param_mag_log, decoder)
         append_parameter_magnitudes(mlp_param_mag_log, scene_mlp)
